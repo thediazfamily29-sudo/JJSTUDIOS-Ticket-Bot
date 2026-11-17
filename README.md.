@@ -1,0 +1,28 @@
+# JJSTUDIOS Ticket Bot
+
+A Discord support ticket bot for JJSTUDIOS.
+
+## Features
+- Ticket category dropdown
+- Private support channels
+- Staff access
+- Close ticket button
+- Transcript logging
+- Ticket data storage
+
+## Ticket Categories
+1. Upgraded Main
+2. Main
+3. Mobile Main
+4. Key / HWID
+5. Bug Report
+6. Appeal
+7. Partnership
+8. General Help
+
+## Setup
+1. Install dependencies with `npm install`.
+2. Configure environment variables.
+3. Start with `npm start`.
+
+**Brand:** JJSTUDIOS
