@@ -1,0 +1,14 @@
+
+{
+  "name": "jjstudios-ticket-bot",
+  "version": "1.0.0",
+  "description": "JJSTUDIOS Discord Support Ticket Bot",
+  "main": "ticket-bot.js",
+  "scripts": {
+    "start": "node ticket-bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.4.7"
+  }
+}
