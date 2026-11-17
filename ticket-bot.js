@@ -18,6 +18,7 @@ const {
 
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 
 // ---------------- CONFIGURATION ----------------
 
@@ -525,6 +526,39 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
+
+// ---------------- RENDER WEB SERVICE HEALTH SERVER ----------------
+
+// Render requires a Web Service to listen on the PORT it provides.
+const PORT = Number(process.env.PORT) || 3000;
+
+const healthServer = http.createServer((req, res) => {
+  if (req.url === "/health" || req.url === "/") {
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    });
+    res.end(JSON.stringify({
+      success: true,
+      service: "JJSTUDIOS Ticket Bot",
+      discord: client.isReady() ? "online" : "connecting"
+    }));
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ success: false, message: "Not found" }));
+});
+
+healthServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`Health server listening on port ${PORT}`);
+});
+
+healthServer.on("error", (error) => {
+  console.error("Health server error:", error);
+  process.exit(1);
+});
+
 // ---------------- START BOT ----------------
 
 client.once("ready", async () => {
@@ -537,4 +571,7 @@ client.once("ready", async () => {
   }
 });
 
-client.login(TOKEN);
+client.login(TOKEN).catch((error) => {
+  console.error("Discord login failed. Check TICKET_BOT_TOKEN in Render:", error);
+  process.exit(1);
+});
