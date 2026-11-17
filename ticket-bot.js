@@ -19,6 +19,7 @@ const {
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
+const https = require("https");
 
 // ---------------- CONFIGURATION ----------------
 
@@ -558,6 +559,44 @@ healthServer.on("error", (error) => {
   console.error("Health server error:", error);
   process.exit(1);
 });
+
+/* ---------------- RENDER KEEP-ALIVE PING ----------------
+   Mirrors Otta's five-minute self-ping using this bot's /health endpoint.
+*/
+const KEEP_ALIVE_INTERVAL = 5 * 60 * 1000;
+
+function startKeepAlive() {
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  const healthUrl = baseUrl.replace(/\/+$/, "") + "/health";
+  const requestModule = healthUrl.startsWith("https://") ? https : http;
+
+  setInterval(() => {
+    requestModule.get(healthUrl, { timeout: 10000 }, (response) => {
+      let body = "";
+
+      response.on("data", chunk => {
+        body += chunk;
+      });
+
+      response.on("end", () => {
+        try {
+          const result = JSON.parse(body);
+          if (response.statusCode === 200 && result.success === true) {
+            console.log(`[KEEP-ALIVE] Health check successful — ${new Date().toLocaleTimeString()}`);
+          } else {
+            console.warn(`[KEEP-ALIVE] Health check returned HTTP ${response.statusCode}`);
+          }
+        } catch (error) {
+          console.warn("[KEEP-ALIVE] Could not read health response:", error.message);
+        }
+      });
+    }).on("error", (error) => {
+      console.warn("[KEEP-ALIVE] Ping failed:", error.message);
+    });
+  }, KEEP_ALIVE_INTERVAL);
+}
+
+startKeepAlive();
 
 // ---------------- START BOT ----------------
 
