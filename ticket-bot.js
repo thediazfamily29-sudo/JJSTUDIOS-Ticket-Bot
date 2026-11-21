@@ -34,7 +34,6 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const ACCOUNTS_API_URL = process.env.ACCOUNTS_API_URL;
 const ACCOUNTS_API_SECRET = process.env.ACCOUNTS_API_SECRET;
 
-// Render persistent disk directory, or local directory
 const DATA_DIR =
   process.env.TICKET_DATA_DIR ||
   process.env.RENDER_DISK_PATH ||
@@ -111,7 +110,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("accounts")
-    .setDescription("View the available JJSTUDIOS account listing.")
+    .setDescription("View your private JJSTUDIOS customer account.")
 ];
 
 async function registerCommands() {
@@ -159,110 +158,129 @@ function makePanel() {
   };
 }
 
-// ---------------- ACCOUNTS COMMAND ----------------
+// ---------------- PRIVATE CUSTOMER ACCOUNTS ----------------
 
-// The API will be added to your original bot later.
-// The ticket bot never receives passwords, tokens, or HWIDs.
+// ACCOUNTS_API_URL must end in /api/account.
+// The Discord user ID is appended by this function.
 
-async function getAccounts() {
+async function getAccount(discordId) {
   if (!ACCOUNTS_API_URL || !ACCOUNTS_API_SECRET) {
-    throw new Error("The accounts API has not been configured yet.");
+    throw new Error("Accounts API is not configured.");
   }
 
-  const response = await fetch(ACCOUNTS_API_URL, {
-    method: "GET",
-    headers: {
-      "x-api-secret": ACCOUNTS_API_SECRET,
-      "Accept": "application/json"
-    },
-    signal: AbortSignal.timeout(15000)
-  });
+  const baseUrl = ACCOUNTS_API_URL.replace(/\/+$/, "");
 
-  if (!response.ok) {
-    throw new Error(`Accounts API returned ${response.status}.`);
-  }
+  const response = await fetch(
+    `${baseUrl}/${encodeURIComponent(discordId)}`,
+    {
+      method: "GET",
+      headers: {
+        "x-api-secret": ACCOUNTS_API_SECRET,
+        "Accept": "application/json"
+      },
+      signal: AbortSignal.timeout(15000)
+    }
+  );
 
   const result = await response.json();
 
-  if (!Array.isArray(result.accounts)) {
-    throw new Error("Invalid accounts API response.");
+  if (response.status === 404) {
+    return null;
   }
 
-  return result.accounts;
+  if (!response.ok || !result.success || !result.account) {
+    throw new Error(
+      result.message || `Accounts API returned ${response.status}.`
+    );
+  }
+
+  return result.account;
 }
 
 async function handleAccounts(interaction) {
-  await interaction.deferReply();
+  await interaction.deferReply({ ephemeral: true });
 
   try {
-    const accounts = await getAccounts();
+    const account = await getAccount(interaction.user.id);
 
-    if (accounts.length === 0) {
+    if (!account) {
       return interaction.editReply(
-        "No accounts are currently available."
+        "You don't have a linked JJSTUDIOS account yet."
       );
     }
 
-    const lines = accounts.map(account => {
-      const username = String(account.username || "Unknown")
-        .replace(/[`*_~|]/g, "");
+    const products = Array.isArray(account.scripts)
+      ? account.scripts.map(script => {
+          if (script === "main") return "Main";
+          if (script === "mobile") return "Mobile Main";
+          return String(script);
+        }).join(", ")
+      : "None";
 
-      const status = String(account.status || "Active")
-        .replace(/[`*_~|]/g, "");
-
-      const scripts = Array.isArray(account.scripts)
-        ? account.scripts.join(", ")
-        : "Not specified";
-
-      return (
-        `**${username}**\n` +
-        `Status: ${status}\n` +
-        `Scripts: ${scripts}`
-      );
-    });
-
-    const pages = [];
-    let currentPage = "";
-
-    for (const line of lines) {
-      if ((currentPage + "\n\n" + line).length > 3500) {
-        pages.push(currentPage);
-        currentPage = line;
-      } else {
-        currentPage += currentPage ? "\n\n" + line : line;
-      }
-    }
-
-    if (currentPage) pages.push(currentPage);
-
-    const firstEmbed = new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(0xF4A6C1)
-      .setTitle(`${BRAND} • Accounts`)
-      .setDescription(pages[0])
+      .setAuthor({
+        name: BRAND,
+        iconURL: interaction.user.displayAvatarURL({ size: 128 })
+      })
+      .setTitle("My JJSTUDIOS Account")
+      .setDescription(
+        `Private account profile for ${interaction.user}.`
+      )
+      .addFields(
+        {
+          name: "Username",
+          value: `\`${String(account.username || "Unknown").slice(0, 100)}\``,
+          inline: true
+        },
+        {
+          name: "Status",
+          value: String(account.status || "Unknown").slice(0, 100),
+          inline: true
+        },
+        {
+          name: "Products",
+          value: products.slice(0, 1024) || "None",
+          inline: false
+        },
+        {
+          name: "Device Lock",
+          value: account.hwidLocked ? "Locked" : "Open",
+          inline: true
+        },
+        {
+          name: "Executions",
+          value: String(Number(account.executions) || 0),
+          inline: true
+        },
+        {
+          name: "Account Created",
+          value: account.keyCreatedAt
+            ? `<t:${Math.floor(account.keyCreatedAt / 1000)}:F>`
+            : "Not available",
+          inline: false
+        },
+        {
+          name: "Expires",
+          value: account.expiresAt
+            ? `<t:${Math.floor(account.expiresAt / 1000)}:F>`
+            : "Not available",
+          inline: false
+        }
+      )
       .setFooter({
-        text: `${accounts.length} account(s) • Public listing`
+        text: `${BRAND} • Private Customer Account`
       })
       .setTimestamp();
 
-    await interaction.editReply({
-      embeds: [firstEmbed]
+    return interaction.editReply({
+      embeds: [embed]
     });
-
-    for (let i = 1; i < pages.length; i++) {
-      const embed = new EmbedBuilder()
-        .setColor(0xF4A6C1)
-        .setTitle(`${BRAND} • Accounts (${i + 1})`)
-        .setDescription(pages[i]);
-
-      await interaction.followUp({
-        embeds: [embed]
-      });
-    }
   } catch (error) {
-    console.error("Accounts command error:", error);
+    console.error("[ACCOUNTS COMMAND ERROR]", error);
 
-    await interaction.editReply(
-      "The accounts listing is temporarily unavailable. Please try again later."
+    return interaction.editReply(
+      "Your account information is temporarily unavailable. Please try again later."
     );
   }
 }
@@ -527,10 +545,8 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-
 // ---------------- RENDER WEB SERVICE HEALTH SERVER ----------------
 
-// Render requires a Web Service to listen on the PORT it provides.
 const PORT = Number(process.env.PORT) || 3000;
 
 const healthServer = http.createServer((req, res) => {
@@ -539,39 +555,49 @@ const healthServer = http.createServer((req, res) => {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store"
     });
+
     res.end(JSON.stringify({
       success: true,
       service: "JJSTUDIOS Ticket Bot",
       discord: client.isReady() ? "online" : "connecting"
     }));
+
     return;
   }
 
-  res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify({ success: false, message: "Not found" }));
+  res.writeHead(404, {
+    "Content-Type": "application/json; charset=utf-8"
+  });
+
+  res.end(JSON.stringify({
+    success: false,
+    message: "Not found"
+  }));
 });
 
 healthServer.listen(PORT, "0.0.0.0", () => {
   console.log(`Health server listening on port ${PORT}`);
 });
 
-healthServer.on("error", (error) => {
+healthServer.on("error", error => {
   console.error("Health server error:", error);
   process.exit(1);
 });
 
-/* ---------------- RENDER KEEP-ALIVE PING ----------------
-   Mirrors Otta's five-minute self-ping using this bot's /health endpoint.
-*/
+// ---------------- RENDER KEEP-ALIVE PING ----------------
+
 const KEEP_ALIVE_INTERVAL = 5 * 60 * 1000;
 
 function startKeepAlive() {
-  const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  const baseUrl =
+    process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
   const healthUrl = baseUrl.replace(/\/+$/, "") + "/health";
+
   const requestModule = healthUrl.startsWith("https://") ? https : http;
 
   setInterval(() => {
-    requestModule.get(healthUrl, { timeout: 10000 }, (response) => {
+    requestModule.get(healthUrl, { timeout: 10000 }, response => {
       let body = "";
 
       response.on("data", chunk => {
@@ -581,16 +607,24 @@ function startKeepAlive() {
       response.on("end", () => {
         try {
           const result = JSON.parse(body);
+
           if (response.statusCode === 200 && result.success === true) {
-            console.log(`[KEEP-ALIVE] Health check successful — ${new Date().toLocaleTimeString()}`);
+            console.log(
+              `[KEEP-ALIVE] Health check successful — ${new Date().toLocaleTimeString()}`
+            );
           } else {
-            console.warn(`[KEEP-ALIVE] Health check returned HTTP ${response.statusCode}`);
+            console.warn(
+              `[KEEP-ALIVE] Health check returned HTTP ${response.statusCode}`
+            );
           }
         } catch (error) {
-          console.warn("[KEEP-ALIVE] Could not read health response:", error.message);
+          console.warn(
+            "[KEEP-ALIVE] Could not read health response:",
+            error.message
+          );
         }
       });
-    }).on("error", (error) => {
+    }).on("error", error => {
       console.warn("[KEEP-ALIVE] Ping failed:", error.message);
     });
   }, KEEP_ALIVE_INTERVAL);
@@ -610,7 +644,11 @@ client.once("ready", async () => {
   }
 });
 
-client.login(TOKEN).catch((error) => {
-  console.error("Discord login failed. Check TICKET_BOT_TOKEN in Render:", error);
+client.login(TOKEN).catch(error => {
+  console.error(
+    "Discord login failed. Check TICKET_BOT_TOKEN in Render:",
+    error
+  );
+
   process.exit(1);
 });
